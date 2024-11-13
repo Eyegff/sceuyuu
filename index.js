@@ -1,6 +1,7 @@
 const express = require('express');
 const line = require('@line/bot-sdk');
 const axios = require('axios');
+const https = require('https');
 
 const app = express();
 
@@ -10,8 +11,14 @@ const config = {
   channelSecret: '6884027b48dc05ad5deadf87245928da'
 };
 
-// เบอร์มือถือสำหรับรับเงิน TrueMoney Wallet
 const MOBILE_NUMBER = '0825658423';
+
+// สร้าง axios instance พร้อมการตั้งค่าพิเศษ
+const axiosInstance = axios.create({
+  httpsAgent: new https.Agent({  
+    rejectUnauthorized: false
+  })
+});
 
 const client = new line.Client(config);
 
@@ -30,7 +37,6 @@ async function handleEvent(event) {
     return Promise.resolve(null);
   }
 
-  // จัดการกับการกดปุ่ม
   if (event.type === 'postback') {
     if (event.postback.data === 'donate') {
       return client.replyMessage(event.replyToken, {
@@ -40,9 +46,7 @@ async function handleEvent(event) {
     }
   }
 
-  // จัดการกับข้อความ
   if (event.type === 'message' && event.message.type === 'text') {
-    // ถ้าพิมพ์ /start จะแสดงปุ่มโดเนท
     if (event.message.text === '/start') {
       const message = {
         type: 'template',
@@ -60,32 +64,36 @@ async function handleEvent(event) {
       return client.replyMessage(event.replyToken, message);
     }
 
-    // จัดการกับลิงก์ TrueMoney
     if (event.message.text.includes('https://gift.truemoney.com/campaign/?v=')) {
       try {
         const code = event.message.text.split('?v=')[1];
-        const response = await axios.post(
+        
+        // สร้าง headers แบบสมจริง
+        const headers = {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
+          'Accept': 'application/json, text/plain, */*',
+          'Accept-Language': 'th-TH,th;q=0.9,en;q=0.8',
+          'Accept-Encoding': 'gzip, deflate, br',
+          'Content-Type': 'application/json',
+          'Origin': 'https://gift.truemoney.com',
+          'Connection': 'keep-alive',
+          'Referer': `https://gift.truemoney.com/campaign/?v=${code}`,
+          'Sec-Fetch-Dest': 'empty',
+          'Sec-Fetch-Mode': 'cors',
+          'Sec-Fetch-Site': 'same-origin',
+          'Cache-Control': 'no-cache',
+          'Pragma': 'no-cache'
+        };
+
+        const response = await axiosInstance.post(
           `https://gift.truemoney.com/campaign/vouchers/${code}/redeem`,
           {
             mobile: MOBILE_NUMBER,
-            voucher_hash: code,
-            campaignType: "transfer"
+            voucher_hash: code
           },
-          {
-            headers: {
-              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/94.0.4606.61 Safari/537.36',
-              'Accept': 'application/json',
-              'Content-Type': 'application/json',
-              'Origin': 'https://gift.truemoney.com',
-              'Accept-Language': 'en-US,en;q=0.9',
-              'Connection': 'keep-alive',
-              'Referer': 'https://gift.truemoney.com/',
-              'Cookie': '_fbp=fb.1.1234567890123.123456789; _ga=GA1.2.123456789.1234567890; _gid=GA1.2.123456789.1234567890'
-            }
-          }
+          { headers }
         );
 
-        // เพิ่ม console.log เพื่อดูการตอบกลับ
         console.log('TrueMoney API Response:', response.data);
 
         if (response.data && response.data.status && response.data.status.code === 'SUCCESS') {
@@ -94,21 +102,23 @@ async function handleEvent(event) {
             text: `รับเงินเรียบร้อยแล้ว! จำนวน ${response.data.amount} บาท ขอบคุณที่โดเนทครับ`
           });
         } else {
-          throw new Error('Invalid response from TrueMoney API');
+          return client.replyMessage(event.replyToken, {
+            type: 'text',
+            text: 'ไม่สามารถรับซองได้ กรุณาตรวจสอบว่าซองยังไม่หมดอายุและยังไม่ถูกใช้'
+          });
         }
       } catch (error) {
         console.error('Error details:', error.response ? error.response.data : error);
         
-        let errorMessage = 'เกิดข้อผิดพลาด กรุณาลองใหม่อีกครั้ง';
+        let errorMessage = 'ไม่สามารถรับซองได้ในขณะนี้ กรุณาลองใหม่อีกครั้ง';
         
-        // ตรวจสอบประเภทของ error
         if (error.response) {
-          if (error.response.data && error.response.data.message) {
-            errorMessage = `ข้อผิดพลาด: ${error.response.data.message}`;
-          }
-          // ถ้าซองถูกใช้ไปแล้ว
-          if (error.response.status === 400 || error.response.status === 404) {
-            errorMessage = 'ซองอั่งเปานี้ถูกใช้ไปแล้วหรือไม่ถูกต้อง กรุณาลองใหม่อีกครั้ง';
+          if (error.response.status === 403) {
+            errorMessage = 'ระบบกำลังมีปัญหา กรุณารอสักครู่แล้วลองใหม่อีกครั้ง';
+          } else if (error.response.status === 404) {
+            errorMessage = 'ไม่พบซองของขวัญ หรือซองถูกใช้ไปแล้ว';
+          } else if (error.response.status === 400) {
+            errorMessage = 'ซองไม่ถูกต้องหรือหมดอายุแล้ว';
           }
         }
         
@@ -128,7 +138,6 @@ async function handleEvent(event) {
   return Promise.resolve(null);
 }
 
-// เริ่มต้น server
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
