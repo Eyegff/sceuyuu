@@ -1,27 +1,152 @@
-const express = require('express');
+// นำเข้าโมดูลที่จำเป็น
 const line = require('@line/bot-sdk');
+const express = require('express');
 const axios = require('axios');
-const https = require('https');
+const { v4: uuidv4 } = require('uuid');
 
-const app = express();
-
-// LINE Bot configuration
+// กำหนดค่า LINE Bot
 const config = {
-  channelAccessToken: 'UKcDMbQt8jAwg7zji13tVf50BPdwOsQYhtyK1D+kACdxYJt1XKY0kvhYdiOK8GE4fgHsrakIGT9Q4UCphSpIhNJwMBeDKaWMzU06YUwhHUqiD7qE5H3GSVvKvpFygwA7DXP8MroQPNW+onG+UYXQ1AdB04t89/1O/w1cDnyilFU=',
-  channelSecret: '6884027b48dc05ad5deadf87245928da'
+  channelAccessToken: 'UKcDMbQt8jAwg7zji13tVf50BPdwOsQYhtyK1D+kACdxYJt1XKY0kvhYdiOK8GE4fgHsrakIGT9Q4UCphSpIhNJwMBeDKaWMzU06YUwhHUqiD7qE5H3GSVvKvpFygwA7DXP8MroQPNW+onG+UYXQ1AdB04t89/1O/w1cDnyilFU=', // แทนที่ด้วย Channel Access Token ของคุณ
+  channelSecret: '6884027b48dc05ad5deadf87245928da' // แทนที่ด้วย Channel Secret ของคุณ
 };
 
-const MOBILE_NUMBER = '0825658423';
-
-// สร้าง axios instance พร้อมการตั้งค่าพิเศษ
-const axiosInstance = axios.create({
-  httpsAgent: new https.Agent({  
-    rejectUnauthorized: false
-  })
-});
-
+// สร้าง client สำหรับ LINE Bot
 const client = new line.Client(config);
 
+// สร้างแอป Express
+const app = express();
+
+// ตั้งค่าการใช้ JSON body
+app.use(express.json());
+
+// เก็บสถานะการสนทนาของผู้ใช้
+const userSessions = {};
+
+// ฟังก์ชันสำหรับแรนดอม UUID
+function generateUUID() {
+  return uuidv4();
+}
+
+// ฟังก์ชันสำหรับสร้างเวลา expiryTime (3 ชั่วโมง)
+function generateExpiryTime() {
+  const now = new Date();
+  const expiryDate = new Date(now.getTime() + 3 * 60 * 60 * 1000); // 3 ชั่วโมง
+  return expiryDate.getTime();
+}
+
+// ฟังก์ชันสำหรับเข้าสู่ระบบ (ใช้ VPS xvre เท่านั้น)
+function login(callback) {
+  const loginOptions = {
+    method: 'POST',
+    url: 'http://botvipicopc.vipv2boxth.xyz:2053/0UnAOmjQ1vIaSIr/login', // URL ของ VPS xvre
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded'
+    },
+    data: new URLSearchParams({
+      'username': '6FocoC0F7a',
+      'password': 'hmSwvyVmAo'
+    })
+  };
+
+  axios(loginOptions)
+    .then(response => {
+      const body = response.data;
+      if (body.success) {
+        console.log('เข้าสู่ระบบสำเร็จ:', body.msg);
+        callback(null);
+      } else {
+        console.log('เข้าสู่ระบบล้มเหลว:', body.msg);
+        callback(new Error(body.msg));
+      }
+    })
+    .catch(error => {
+      console.error('เกิดข้อผิดพลาดในการเข้าสู่ระบบ:', error);
+      callback(error);
+    });
+}
+
+// ฟังก์ชันสำหรับเพิ่มลูกค้าใหม่ (ใช้ VPS xvre เท่านั้น)
+function addNewClient(session, successCallback, errorCallback) {
+  const clientUUID = generateUUID();
+  const expiryTime = generateExpiryTime();
+
+  const apiUrl = 'http://botvipicopc.vipv2boxth.xyz:2053/0UnAOmjQ1vIaSIr/panel/api/inbounds/addClient';
+  const apiSettings = {
+    clients: [{
+      id: clientUUID,
+      alterId: 0,
+      email: session.codeName, // ใช้ชื่อที่ผู้ใช้ตั้ง
+      limitIp: 2,
+      totalGB: 0, // ไม่จำกัด GB
+      expiryTime: expiryTime,
+      enable: true,
+      tgId: '',
+      subId: ''
+    }]
+  };
+
+  const options = {
+    method: 'POST',
+    url: apiUrl,
+    headers: {
+      'Accept': 'application/json',
+      'Content-Type': 'application/json'
+    },
+    data: {
+      id: 4, // ใช้ apiId สำหรับ xvre VPS
+      settings: JSON.stringify(apiSettings)
+    }
+  };
+
+  axios(options)
+    .then(response => {
+      const body = response.data;
+      if (body.success) {
+        console.log('เพิ่มลูกค้าสำเร็จ:', body.msg);
+        // สร้างโค้ดตามที่ต้องการ
+        let clientCode = `vless://${clientUUID}@botvipicopc.vipv2boxth.xyz:2052?type=ws&path=%2F&host=botvipicopc.vipv2boxth.xyz&security=none#${encodeURIComponent(session.codeName)}`;
+        successCallback(clientCode, expiryTime);
+      } else {
+        console.log('การเพิ่มลูกค้าล้มเหลว:', body.msg);
+        errorCallback(body.msg);
+      }
+    })
+    .catch(error => {
+      console.error('เกิดข้อผิดพลาดในการส่งคำขอ:', error);
+      errorCallback('เกิดข้อผิดพลาดในการส่งคำขอ');
+    });
+}
+
+// ฟังก์ชันสำหรับส่งโค้ดไปยังผู้ใช้ในแชทเดียวกัน
+function sendCodeToChat(replyToken, chatId, clientCode, session, expiryTime) {
+  const message = {
+    type: 'text',
+    text: `✅ *โค้ดของคุณถูกสร้างสำเร็จ!*\n\n📬 กรุณาตรวจสอบโค้ดของคุณด้านล่าง:\n\n\`${clientCode}\`\n\n⏰ หมดอายุใน 3 ชั่วโมง`
+  };
+
+  client.replyMessage(replyToken, message)
+    .then(() => {
+      console.log('ส่งโค้ดไปยังผู้ใช้เรียบร้อยแล้ว');
+      delete userSessions[chatId];
+    })
+    .catch((error) => {
+      if (error.statusCode === 403) {
+        // ผู้ใช้ยังไม่ได้เริ่มแชทกับบอท
+        const replyMessage = {
+          type: 'text',
+          text: `🔗 กรุณาเริ่มแชทกับบอทก่อนที่จะรับโค้ด\n\n📌 คลิกที่นี่เพื่อเริ่มแชท: https://line.me/R/ti/p/YOUR_LINE_ID`
+        };
+        client.pushMessage(chatId, replyMessage)
+          .catch((err) => {
+            console.error('Error notifying user to start chat:', err);
+          });
+      } else {
+        console.error('Error sending code to user:', error);
+      }
+    });
+}
+
+// จัดการข้อความจากผู้ใช้
 app.post('/webhook', line.middleware(config), (req, res) => {
   Promise
     .all(req.body.events.map(handleEvent))
@@ -32,113 +157,105 @@ app.post('/webhook', line.middleware(config), (req, res) => {
     });
 });
 
-async function handleEvent(event) {
-  if (event.type !== 'message' && event.type !== 'postback') {
+// ฟังก์ชันสำหรับจัดการแต่ละเหตุการณ์
+function handleEvent(event) {
+  if (event.type !== 'message' || event.message.type !== 'text') {
+    // ไม่รองรับประเภทอื่นนอกจากข้อความ
     return Promise.resolve(null);
   }
 
-  if (event.type === 'postback') {
-    if (event.postback.data === 'donate') {
-      return client.replyMessage(event.replyToken, {
-        type: 'text',
-        text: 'กรุณาส่งลิงก์ซองอั่งเปาวอเลทมาให้เรานะครับ'
-      });
-    }
-  }
+  const userId = event.source.userId;
+  const chatId = event.source.groupId || userId; // ใช้ groupId หากอยู่ในกลุ่ม หรือ userId หากเป็นการแชทส่วนตัว
+  const text = event.message.text.trim().toLowerCase();
 
-  if (event.type === 'message' && event.message.type === 'text') {
-    if (event.message.text === '/start') {
-      const message = {
-        type: 'template',
-        altText: 'Donate Button',
-        template: {
-          type: 'buttons',
-          text: 'กดปุ่มเพื่อโดเนทซองอั่งเปาวอเลท',
-          actions: [{
-            type: 'postback',
-            label: 'Donate',
-            data: 'donate'
-          }]
-        }
-      };
-      return client.replyMessage(event.replyToken, message);
-    }
+  // ตรวจสอบว่าผู้ใช้อยู่ในสถานะการสนทนาหรือไม่
+  if (userSessions[chatId]) {
+    const session = userSessions[chatId];
 
-    if (event.message.text.includes('https://gift.truemoney.com/campaign/?v=')) {
-      try {
-        const code = event.message.text.split('?v=')[1];
-        
-        // สร้าง headers แบบสมจริง
-        const headers = {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
-          'Accept': 'application/json, text/plain, */*',
-          'Accept-Language': 'th-TH,th;q=0.9,en;q=0.8',
-          'Accept-Encoding': 'gzip, deflate, br',
-          'Content-Type': 'application/json',
-          'Origin': 'https://gift.truemoney.com',
-          'Connection': 'keep-alive',
-          'Referer': `https://gift.truemoney.com/campaign/?v=${code}`,
-          'Sec-Fetch-Dest': 'empty',
-          'Sec-Fetch-Mode': 'cors',
-          'Sec-Fetch-Site': 'same-origin',
-          'Cache-Control': 'no-cache',
-          'Pragma': 'no-cache'
-        };
-
-        const response = await axiosInstance.post(
-          `https://gift.truemoney.com/campaign/vouchers/${code}/redeem`,
-          {
-            mobile: MOBILE_NUMBER,
-            voucher_hash: code
-          },
-          { headers }
-        );
-
-        console.log('TrueMoney API Response:', response.data);
-
-        if (response.data && response.data.status && response.data.status.code === 'SUCCESS') {
-          return client.replyMessage(event.replyToken, {
-            type: 'text',
-            text: `รับเงินเรียบร้อยแล้ว! จำนวน ${response.data.amount} บาท ขอบคุณที่โดเนทครับ`
-          });
-        } else {
-          return client.replyMessage(event.replyToken, {
-            type: 'text',
-            text: 'ไม่สามารถรับซองได้ กรุณาตรวจสอบว่าซองยังไม่หมดอายุและยังไม่ถูกใช้'
-          });
-        }
-      } catch (error) {
-        console.error('Error details:', error.response ? error.response.data : error);
-        
-        let errorMessage = 'ไม่สามารถรับซองได้ในขณะนี้ กรุณาลองใหม่อีกครั้ง';
-        
-        if (error.response) {
-          if (error.response.status === 403) {
-            errorMessage = 'ระบบกำลังมีปัญหา กรุณารอสักครู่แล้วลองใหม่อีกครั้ง';
-          } else if (error.response.status === 404) {
-            errorMessage = 'ไม่พบซองของขวัญ หรือซองถูกใช้ไปแล้ว';
-          } else if (error.response.status === 400) {
-            errorMessage = 'ซองไม่ถูกต้องหรือหมดอายุแล้ว';
-          }
-        }
-        
-        return client.replyMessage(event.replyToken, {
+    if (session.step === 'ask_network') {
+      // รับข้อมูลเครือข่าย
+      const network = text;
+      if (['ทรูโนโปร', 'ทรูโปรเฟส', 'ais'].includes(network)) {
+        session.network = network;
+        session.step = 'ask_code_name';
+        const reply = {
           type: 'text',
-          text: errorMessage
-        });
+          text: '📛 กรุณาตั้งชื่อโค้ดที่คุณต้องการ'
+        };
+        return client.replyMessage(event.replyToken, reply);
+      } else {
+        const reply = {
+          type: 'text',
+          text: '⚠️ กรุณาเลือกเครือข่ายจากตัวเลือก: ทรูโนโปร, ทรูโปรเฟส, AIS'
+        };
+        return client.replyMessage(event.replyToken, reply);
       }
-    } else {
-      return client.replyMessage(event.replyToken, {
+    } else if (session.step === 'ask_code_name') {
+      // รับชื่อโค้ด
+      const codeName = text;
+      session.codeName = codeName;
+      session.step = 'creating_code';
+      const reply = {
         type: 'text',
-        text: 'กรุณาส่งลิงก์ซองอั่งเปาวอเลทที่ถูกต้อง'
+        text: '⏳ กำลังสร้างโค้ดของคุณ โปรดรอสักครู่...'
+      };
+      client.replyMessage(event.replyToken, reply);
+
+      // เข้าสู่ระบบและสร้างโค้ด
+      login((loginError) => {
+        if (loginError) {
+          const errorReply = {
+            type: 'text',
+            text: '🚫 เกิดข้อผิดพลาดในการเข้าสู่ระบบ โปรดลองใหม่อีกครั้ง'
+          };
+          client.pushMessage(chatId, errorReply);
+          delete userSessions[chatId];
+          return;
+        }
+
+        addNewClient(session, (clientCode, expiryTime) => {
+          // ส่งโค้ดไปยังผู้ใช้ในแชทเดียวกัน
+          sendCodeToChat(event.replyToken, chatId, clientCode, session, expiryTime);
+
+          const successReply = {
+            type: 'text',
+            text: '✅ โค้ดของคุณถูกส่งเรียบร้อยแล้ว! โปรดตรวจสอบ.'
+          };
+          client.pushMessage(chatId, successReply);
+        }, (errorMsg) => {
+          const errorReply = {
+            type: 'text',
+            text: `🚫 เกิดข้อผิดพลาดในการสร้างโค้ด: ${errorMsg}`
+          };
+          client.pushMessage(chatId, errorReply);
+          delete userSessions[chatId];
+        });
       });
+
+      return Promise.resolve(null);
+    }
+  } else {
+    // เริ่มต้นการสนทนาเมื่อผู้ใช้ส่งข้อความ "สร้างโค้ดให้หน่อย"
+    if (text.includes('สร้างโค้ดให้หน่อย')) {
+      userSessions[chatId] = { step: 'ask_network' };
+      const reply = {
+        type: 'text',
+        text: '🔧 กรุณาเลือกเครือข่ายที่ต้องการสร้างโค้ด:\n\n1. ทรูโนโปร\n2. ทรูโปรเฟส\n3. AIS'
+      };
+      return client.replyMessage(event.replyToken, reply);
+    } else {
+      // ไม่รู้จักคำสั่ง
+      const reply = {
+        type: 'text',
+        text: '❓ ไม่เข้าใจคำสั่งของคุณ โปรดพิมพ์ "สร้างโค้ดให้หน่อย" เพื่อเริ่มสร้างโค้ด'
+      };
+      return client.replyMessage(event.replyToken, reply);
     }
   }
-
-  return Promise.resolve(null);
 }
 
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`Server is running on port ${PORT}`);
+// เริ่มต้นเซิร์ฟเวอร์
+const port = process.env.PORT || 3000;
+app.listen(port, () => {
+  console.log(`Server is running on port ${port}`);
 });
