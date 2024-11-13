@@ -6,8 +6,8 @@ const { v4: uuidv4 } = require('uuid');
 
 // กำหนดค่า LINE Bot
 const config = {
-  channelAccessToken: 'UKcDMbQt8jAwg7zji13tVf50BPdwOsQYhtyK1D+kACdxYJt1XKY0kvhYdiOK8GE4fgHsrakIGT9Q4UCphSpIhNJwMBeDKaWMzU06YUwhHUqiD7qE5H3GSVvKvpFygwA7DXP8MroQPNW+onG+UYXQ1AdB04t89/1O/w1cDnyilFU=', // แทนที่ด้วย Channel Access Token ของคุณ
-  channelSecret: '6884027b48dc05ad5deadf87245928da' // แทนที่ด้วย Channel Secret ของคุณ
+  channelAccessToken: 'UKcDMbQt8jAwg7zji13tVf50BPdwOsQYhtyK1D+kACdxYJt1XKY0kvhYdiOK8GE4fgHsrakIGT9Q4UCphSpIhNJwMBeDKaWMzU06YUwhHUqiD7qE5H3GSVvKvpFygwA7DXP8MroQPNW+onG+UYXQ1AdB04t89/1O/w1cDnyilFU=',
+  channelSecret: '6884027b48dc05ad5deadf87245928da'
 };
 
 // สร้าง client สำหรับ LINE Bot
@@ -16,8 +16,14 @@ const client = new line.Client(config);
 // สร้างแอป Express
 const app = express();
 
-// ตั้งค่าการใช้ JSON body
-app.use(express.json());
+// ตั้งค่า body parser สำหรับ raw body
+const bodyParser = express.json({
+  verify: (req, res, buf) => {
+    req.rawBody = buf;
+  }
+});
+
+app.use(bodyParser);
 
 // เก็บสถานะการสนทนาของผู้ใช้
 const userSessions = {};
@@ -38,7 +44,7 @@ function generateExpiryTime() {
 function login(callback) {
   const loginOptions = {
     method: 'POST',
-    url: 'http://botvipicopc.vipv2boxth.xyz:2053/0UnAOmjQ1vIaSIr/login', // URL ของ VPS xvre
+    url: 'http://botvipicopc.vipv2boxth.xyz:2053/0UnAOmjQ1vIaSIr/login',
     headers: {
       'Content-Type': 'application/x-www-form-urlencoded'
     },
@@ -75,7 +81,7 @@ function addNewClient(session, successCallback, errorCallback) {
     clients: [{
       id: clientUUID,
       alterId: 0,
-      email: session.codeName, // ใช้ชื่อที่ผู้ใช้ตั้ง
+      email: session.codeName,
       limitIp: 2,
       totalGB: 0, // ไม่จำกัด GB
       expiryTime: expiryTime,
@@ -93,7 +99,7 @@ function addNewClient(session, successCallback, errorCallback) {
       'Content-Type': 'application/json'
     },
     data: {
-      id: 4, // ใช้ apiId สำหรับ xvre VPS
+      id: 4,
       settings: JSON.stringify(apiSettings)
     }
   };
@@ -103,7 +109,6 @@ function addNewClient(session, successCallback, errorCallback) {
       const body = response.data;
       if (body.success) {
         console.log('เพิ่มลูกค้าสำเร็จ:', body.msg);
-        // สร้างโค้ดตามที่ต้องการ
         let clientCode = `vless://${clientUUID}@botvipicopc.vipv2boxth.xyz:2052?type=ws&path=%2F&host=botvipicopc.vipv2boxth.xyz&security=none#${encodeURIComponent(session.codeName)}`;
         successCallback(clientCode, expiryTime);
       } else {
@@ -131,7 +136,6 @@ function sendCodeToChat(replyToken, chatId, clientCode, session, expiryTime) {
     })
     .catch((error) => {
       if (error.statusCode === 403) {
-        // ผู้ใช้ยังไม่ได้เริ่มแชทกับบอท
         const replyMessage = {
           type: 'text',
           text: `🔗 กรุณาเริ่มแชทกับบอทก่อนที่จะรับโค้ด\n\n📌 คลิกที่นี่เพื่อเริ่มแชท: https://line.me/R/ti/p/YOUR_LINE_ID`
@@ -147,25 +151,39 @@ function sendCodeToChat(replyToken, chatId, clientCode, session, expiryTime) {
 }
 
 // จัดการข้อความจากผู้ใช้
-app.post('/webhook', line.middleware(config), (req, res) => {
-  Promise
-    .all(req.body.events.map(handleEvent))
-    .then((result) => res.json(result))
-    .catch((err) => {
-      console.error(err);
-      res.status(500).end();
-    });
+app.post('/webhook', (req, res) => {
+  const signature = req.get('x-line-signature');
+  
+  if (!signature) {
+    return res.status(400).send('Missing x-line-signature');
+  }
+
+  try {
+    // ตรวจสอบความถูกต้องของ signature
+    if (!line.validateSignature(req.rawBody, config.channelSecret, signature)) {
+      return res.status(400).send('Invalid signature');
+    }
+
+    Promise.all(req.body.events.map(handleEvent))
+      .then((result) => res.json(result))
+      .catch((err) => {
+        console.error('Error handling webhook:', err);
+        res.status(500).end();
+      });
+  } catch (err) {
+    console.error('Error validating signature:', err);
+    res.status(500).send('Internal server error');
+  }
 });
 
 // ฟังก์ชันสำหรับจัดการแต่ละเหตุการณ์
 function handleEvent(event) {
   if (event.type !== 'message' || event.message.type !== 'text') {
-    // ไม่รองรับประเภทอื่นนอกจากข้อความ
     return Promise.resolve(null);
   }
 
   const userId = event.source.userId;
-  const chatId = event.source.groupId || userId; // ใช้ groupId หากอยู่ในกลุ่ม หรือ userId หากเป็นการแชทส่วนตัว
+  const chatId = event.source.groupId || userId;
   const text = event.message.text.trim().toLowerCase();
 
   // ตรวจสอบว่าผู้ใช้อยู่ในสถานะการสนทนาหรือไม่
@@ -173,7 +191,6 @@ function handleEvent(event) {
     const session = userSessions[chatId];
 
     if (session.step === 'ask_network') {
-      // รับข้อมูลเครือข่าย
       const network = text;
       if (['ทรูโนโปร', 'ทรูโปรเฟส', 'ais'].includes(network)) {
         session.network = network;
@@ -191,7 +208,6 @@ function handleEvent(event) {
         return client.replyMessage(event.replyToken, reply);
       }
     } else if (session.step === 'ask_code_name') {
-      // รับชื่อโค้ด
       const codeName = text;
       session.codeName = codeName;
       session.step = 'creating_code';
@@ -201,7 +217,6 @@ function handleEvent(event) {
       };
       client.replyMessage(event.replyToken, reply);
 
-      // เข้าสู่ระบบและสร้างโค้ด
       login((loginError) => {
         if (loginError) {
           const errorReply = {
@@ -214,7 +229,6 @@ function handleEvent(event) {
         }
 
         addNewClient(session, (clientCode, expiryTime) => {
-          // ส่งโค้ดไปยังผู้ใช้ในแชทเดียวกัน
           sendCodeToChat(event.replyToken, chatId, clientCode, session, expiryTime);
 
           const successReply = {
@@ -234,28 +248,24 @@ function handleEvent(event) {
 
       return Promise.resolve(null);
     }
+  } else if (text.includes('สร้างโค้ดให้หน่อย')) {
+    userSessions[chatId] = { step: 'ask_network' };
+    const reply = {
+      type: 'text',
+      text: '🔧 กรุณาเลือกเครือข่ายที่ต้องการสร้างโค้ด:\n\n1. ทรูโนโปร\n2. ทรูโปรเฟส\n3. AIS'
+    };
+    return client.replyMessage(event.replyToken, reply);
   } else {
-    // เริ่มต้นการสนทนาเมื่อผู้ใช้ส่งข้อความ "สร้างโค้ดให้หน่อย"
-    if (text.includes('สร้างโค้ดให้หน่อย')) {
-      userSessions[chatId] = { step: 'ask_network' };
-      const reply = {
-        type: 'text',
-        text: '🔧 กรุณาเลือกเครือข่ายที่ต้องการสร้างโค้ด:\n\n1. ทรูโนโปร\n2. ทรูโปรเฟส\n3. AIS'
-      };
-      return client.replyMessage(event.replyToken, reply);
-    } else {
-      // ไม่รู้จักคำสั่ง
-      const reply = {
-        type: 'text',
-        text: '❓ ไม่เข้าใจคำสั่งของคุณ โปรดพิมพ์ "สร้างโค้ดให้หน่อย" เพื่อเริ่มสร้างโค้ด'
-      };
-      return client.replyMessage(event.replyToken, reply);
-    }
+    const reply = {
+      type: 'text',
+      text: '❓ ไม่เข้าใจคำสั่งของคุณ โปรดพิมพ์ "สร้างโค้ดให้หน่อย" เพื่อเริ่มสร้างโค้ด'
+    };
+    return client.replyMessage(event.replyToken, reply);
   }
 }
 
 // เริ่มต้นเซิร์ฟเวอร์
-const port = process.env.PORT || 3000;
+const port = process.env.PORT || 10000;
 app.listen(port, () => {
   console.log(`Server is running on port ${port}`);
 });
