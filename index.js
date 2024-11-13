@@ -4,7 +4,7 @@ const axios = require('axios');
 
 const app = express();
 
-// LINE Bot configuration - ใส่ token ของคุณที่นี่
+// LINE Bot configuration
 const config = {
   channelAccessToken: 'UKcDMbQt8jAwg7zji13tVf50BPdwOsQYhtyK1D+kACdxYJt1XKY0kvhYdiOK8GE4fgHsrakIGT9Q4UCphSpIhNJwMBeDKaWMzU06YUwhHUqiD7qE5H3GSVvKvpFygwA7DXP8MroQPNW+onG+UYXQ1AdB04t89/1O/w1cDnyilFU=',
   channelSecret: '6884027b48dc05ad5deadf87245928da'
@@ -68,7 +68,8 @@ async function handleEvent(event) {
           `https://gift.truemoney.com/campaign/vouchers/${code}/redeem`,
           {
             mobile: MOBILE_NUMBER,
-            voucher_hash: code
+            voucher_hash: code,
+            campaignType: "transfer"
           },
           {
             headers: {
@@ -77,27 +78,43 @@ async function handleEvent(event) {
               'Content-Type': 'application/json',
               'Origin': 'https://gift.truemoney.com',
               'Accept-Language': 'en-US,en;q=0.9',
-              'Connection': 'keep-alive'
+              'Connection': 'keep-alive',
+              'Referer': 'https://gift.truemoney.com/',
+              'Cookie': '_fbp=fb.1.1234567890123.123456789; _ga=GA1.2.123456789.1234567890; _gid=GA1.2.123456789.1234567890'
             }
           }
         );
 
-        if (response.status === 200) {
+        // เพิ่ม console.log เพื่อดูการตอบกลับ
+        console.log('TrueMoney API Response:', response.data);
+
+        if (response.data && response.data.status && response.data.status.code === 'SUCCESS') {
           return client.replyMessage(event.replyToken, {
             type: 'text',
-            text: 'รับเงินเรียบร้อยแล้ว! ขอบคุณที่โดเนทครับ'
+            text: `รับเงินเรียบร้อยแล้ว! จำนวน ${response.data.amount} บาท ขอบคุณที่โดเนทครับ`
           });
         } else {
-          return client.replyMessage(event.replyToken, {
-            type: 'text',
-            text: 'เกิดข้อผิดพลาดในการรับเงิน โปรดตรวจสอบลิงก์และลองใหม่อีกครั้ง'
-          });
+          throw new Error('Invalid response from TrueMoney API');
         }
       } catch (error) {
-        console.error('Error processing donation:', error);
+        console.error('Error details:', error.response ? error.response.data : error);
+        
+        let errorMessage = 'เกิดข้อผิดพลาด กรุณาลองใหม่อีกครั้ง';
+        
+        // ตรวจสอบประเภทของ error
+        if (error.response) {
+          if (error.response.data && error.response.data.message) {
+            errorMessage = `ข้อผิดพลาด: ${error.response.data.message}`;
+          }
+          // ถ้าซองถูกใช้ไปแล้ว
+          if (error.response.status === 400 || error.response.status === 404) {
+            errorMessage = 'ซองอั่งเปานี้ถูกใช้ไปแล้วหรือไม่ถูกต้อง กรุณาลองใหม่อีกครั้ง';
+          }
+        }
+        
         return client.replyMessage(event.replyToken, {
           type: 'text',
-          text: 'เกิดข้อผิดพลาด กรุณาลองใหม่อีกครั้ง'
+          text: errorMessage
         });
       }
     } else {
