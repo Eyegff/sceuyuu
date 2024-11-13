@@ -11,7 +11,7 @@ const config = {
 };
 
 // เบอร์มือถือสำหรับรับเงิน TrueMoney Wallet
-const MOBILE_NUMBER = 'your_mobile_number_here';
+const MOBILE_NUMBER = '0825658423';
 
 const client = new line.Client(config);
 
